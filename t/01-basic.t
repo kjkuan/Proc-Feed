@@ -1,10 +1,9 @@
 use v6;
 
 use Test;
-use IO::String;
 
 use lib 'lib';
-use Proc::Feed :DEFAULT, :each, :gather-with;
+use Proc::Feed (:DEFAULT, :each, :gather-with);
 
 plan :skip-all if $*DISTRO.is-win;
 

@@ -1,0 +1,21 @@
+{
+    "perl" : "6.d",
+    "name" : "Proc::Feed",
+    "api"  : "1",
+    "auth" : "github:kjkuan",
+    "version" : "1.0.0",
+    "description" : "Convenient Proc::Async wrappers that work with the Perl 6 feed operators.",
+    "authors" : [ "Jack Kuan" ],
+    "license" : "Artistic-2.0",
+    "provides" : {
+        "Proc::Feed" : "lib/Proc/Feed.pm6"
+    },
+    "depends" : [],
+    "build-depends" : [],
+    "test-depends" : [],
+    "resources" : [],
+    "tags": [
+      "Unix", "Shell", "Run", "Proc::Async"
+    ],
+    "source-url" : "git://github.com/kjkuan/Proc-Feed.git"
+}

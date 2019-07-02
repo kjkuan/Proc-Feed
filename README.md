@@ -1,7 +1,29 @@
+# Introduction
 `Proc::Feed` provides a couple wrappers for `Proc::Async` that are 
-more convenient to use than the `run` and `shell` subs. Specifially, these
-wrapper subs let you easily feed data to them and also from them to other
+more convenient to use than the `run` and `shell` subs. Specifically, these
+wrappers let you easily feed data to them and also from them to other
 callables using the feed operator (`==>` or `<==`).
+
+---
+## `sub proc`
+
+```perl6
+sub proc(
+    \command where Str:D|List:D,
+    $input? is raw,
+
+    Bool :$check = True,
+    Bool :$bin,    # only applies to input.
+
+    :$shell where Bool:D|Str:D = False,
+
+    :$cwd = $*CWD,
+    Hash() :$env = %*ENV,
+
+    :$scheduler = $*SCHEDULER
+
+) is export(:DEFAULT, :proc);
+```
 
 Use the `proc` sub to run a command when you don't need to capture its output:
 
@@ -54,6 +76,33 @@ and so on, in the shell command/script:
     echo "Second argument is: $2"
     EOF
 ```
+---
+## `sub capture`
+
+```perl6
+sub capture(
+    \command where Str:D|List:D,
+    $input? is raw,
+
+    Bool :$check = True,
+    Bool :$chomp = True,
+    Bool :$merge,
+    Bool :$bin,    # only applies to input.
+
+    :$shell where Bool:D|Str:D = False,
+
+    Str:D :$enc = 'UTF-8',
+    Bool :$translate-nl = True,
+
+    :$cwd = $*CWD,
+    Hash() :$env = %*ENV,
+
+    :$scheduler = $*SCHEDULER
+
+    --> Str:D
+
+) is export(:DEFAULT, :capture);
+```
 
 To capture the `STDOUT` of a command use the `capture` sub, which returns a `Str:D`
 instead of a `Proc`:
@@ -79,7 +128,8 @@ instead of a `Proc`:
 > `:!check`, and in which case, an empty string will be returned if the command
 > fails.
 
-You can easily feed iterable inputs to a `proc` / `capture` / `pipe`:
+You can easily feed iterable inputs to a `capture`: (you can do the same with
+`proc` or `pipe` too):
 
 ```perl6
     my $data = slurp("$*HOME/.bashrc");
@@ -112,13 +162,50 @@ both to be binary with `:bin`, or only one of which to be binary with either
 
 > **NOTE**: It makes no sense to feed from a `proc` (i.e., `proc(…) ==> …`) because
 > `proc(…)` returns a `Proc`, which is not iterable.
+---
 
-Finally, `pipe` returns an iterable of the output from the `STDOUT` of the
-external process, so you can feed it to another callable. `pipe` should be used
-within a `Block` passed to the `run` sub, which returns the result returned by
-the block:
+## `sub pipe`
 
 ```perl6
+sub pipe(
+    \command where Str:D|List:D,
+    $input? is raw,
+
+    Bool :$chomp is copy,
+
+    :$bin where {
+        $_ ~~ Bool:D|'IN'|'OUT' and (
+            # if :bin or :bin<OUT> then :chomp shouldn't be specified.
+            ! ($_ eq 'OUT' || ($_ ~~ Bool && $_))
+            || !$chomp
+        )
+    } = False,
+
+    Bool :$merge,
+
+    Str:D :$enc = 'UTF-8',
+    Bool :$translate-nl = True,
+
+    :$cwd = $*CWD,
+    Hash() :$env = %*ENV,
+
+    :$shell where Bool:D|Str:D = False,
+
+    :$scheduler = $*SCHEDULER
+
+) is export(:DEFAULT, :pipe);
+```
+
+Finally, `pipe` returns an iterable of the output from the `STDOUT` of the
+external process, so you can feed it to another callable. By default, text
+output is assumed and the output is an iterable of lines. If binary output
+is specified, then the output will be an iterable of `Blob`'s.
+
+`pipe` should be used within a `Block` passed to the `run` sub, which returns
+the result returned by the block:
+
+```perl6
+    # Example
     my $chksum = run {
         slurp("/bin/bash", :bin) \
         ==> pipe('gzip', :bin)
@@ -127,6 +214,7 @@ the block:
         ==> *.[0]()
     }
 
+    # Example
     run {
         my $tarball = open("./somedir.tgz", :w);
         LEAVE $tarball.close;
@@ -134,6 +222,7 @@ the block:
         ==> each { spurt $tarball, $_ }
     }
 
+    # Example
     my $total = run {
         [+] (pipe(«find /var/log/ -f») ==> map(*.IO.s))
     } 
@@ -179,3 +268,43 @@ item is a `BrokenPipeline` exception object if there's any.
 > this module currently is not smart enough to connect the `STDOUT` of the first
 > process to the `STDIN` of the second process, and therefore the data have to 
 > go through Perl 6.
+
+
+## Other helpers
+```perl6
+sub each(&code, $input? is raw) is export(:each);
+sub gather-with(&code, $input? is raw) is export(:gather-with);
+```
+`each` makes feeding into a block that just wants to be called for each item
+of the iterable fed to it easier:
+
+```perl6
+# using each:
+(1,2,3,4) ==> each { .say }
+
+# without each:
+(1,2,3,4) ==> { .say for $_ }()
+```
+
+`gather-with` makes it easier to feed into a `gather ... take` construct with
+a block:
+
+```perl6
+# using gather-with:
+1,1, * + * ... Inf ==> gather-with { take $_ ** 2 } ==> { .[0..^10] }()
+}
+# without gather-with
+1,1, * + * ... Inf ==> { gather for $_ { take $_ ** 2 } }() ==> { .[0..^10] }()
+```
+
+```perl6
+sub quote(Str $s --> Str) is export(:quote);
+```
+
+`quote` will single-quote a string so that it can be used in a shell script/command
+literally:
+
+```perl6
+my $file = q/someone's file is > than 1GB/;
+put capture("echo {quote $file}", :shell);
+```
