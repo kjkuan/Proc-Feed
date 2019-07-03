@@ -136,9 +136,9 @@ You can easily feed iterable inputs to a `capture`: (you can do the same with
     my $chksum = ($data ==> capture('md5sum')).split(' ')[0];
 ```
 
-By default, both inputs are assumed to be lines of strings, but you can specify
-both to be binary with `:bin`, or only one of which to be binary with either
-`:bin<IN>` or `:bin<OUT>`:
+By default, both input and output are assumed to be lines of strings, but you
+can specify both to be binary with `:bin`, or only one of which to be binary
+with either `:bin<IN>` or `:bin<OUT>`:
 
 > **NOTE**: For `capture` and `proc`, only `:bin` and `:!bin` are possible, and
 > both apply only to `STDIN`.

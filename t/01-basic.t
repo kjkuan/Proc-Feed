@@ -34,7 +34,7 @@ my @args := ("arg  1", "arg  2");
 is capture(('echo "$@"', |@args), |$sh), 'arg  1 arg  2', 'Running an inline shell script with arguments works - 2 ';
 
 is capture('echo error! >&2', |$sh, :merge), "error!", 'Redirecting STDERR to STDOUT works - 1';
-like capture(<<ls -la adsfasdfs>>, :!check, :merge), /"No such file or directory"/, 'Redirecting STDERR to STDOUT works - 2';
+like capture(<<ls -la adsfasdfs>>, :!check, :merge), /"'adsfasdfs'"/, 'Redirecting STDERR to STDOUT works - 2';
 
 dies-ok { capture('exit 1', |$sh) }, 'Capture throws an exception on non-zero exit status by default';
 is capture('echo failed >&2; exit 1', |$sh, :merge, :!check), 'failed', 'Capture with :!check ignores the exit status';
