@@ -345,8 +345,8 @@ sub pipe(
 
 sub each(&code, $input? is raw) is export(:each) { code($_) for $input }
 
-sub gather-with(&code, $input? is raw) is export(:gather-with) {
-    gather code($input);
+multi sub map(Range \range, &code, $input? is raw) is export(:map) {
+    gather for $input[range] { take code($_) }
 }
 
 sub quote(Str $s --> Str) is export(:quote) { "'{$s.subst("'", Q/'\''/)}'" }

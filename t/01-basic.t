@@ -3,7 +3,7 @@ use v6;
 use Test;
 
 use lib 'lib';
-use Proc::Feed (:DEFAULT, :each, :gather-with);
+use Proc::Feed (:DEFAULT, :each, :map);
 
 plan :skip-all if $*DISTRO.is-win;
 my $sh = :shell</bin/sh>;
@@ -55,7 +55,7 @@ my @result := run {
             echo $i
         done
         EOF
-    ==> gather-with {.take for $_[1..7]} \
+    ==> map 1..7, { $_ } \
     ==> map {$_ * 2} \
     ==> @
     # the last @ initiate the "pull" of data on the pipeline,
@@ -104,7 +104,7 @@ is (run {
 # This should not block.
 run {
     pipe('LC_CTYPE=C exec tr -cd a-f0-9 </dev/urandom', :bin, |$sh) \
-    ==> gather-with { .take for $_[^5] } \
+    ==> map ^5, { $_ } \
     ==> each { put "DATA:    ", .decode }
 }
 

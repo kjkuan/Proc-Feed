@@ -273,10 +273,10 @@ item is a `BrokenPipeline` exception object if there's any.
 ## Other helpers
 ```perl6
 sub each(&code, $input? is raw) is export(:each);
-sub gather-with(&code, $input? is raw) is export(:gather-with);
+multi sub map(Range \range, &code, $input? is raw) is export(:map);
 ```
-`each` makes feeding into a block that just wants to be called for each item
-of the iterable fed to it easier:
+`each`, often used for side effects, makes feeding into a block that
+just wants to be called for each item of the iterable fed to it easier:
 
 ```perl6
 # using each:
@@ -286,15 +286,15 @@ of the iterable fed to it easier:
 (1,2,3,4) ==> { .say for $_ }()
 ```
 
-`gather-with` makes it easier to feed into a `gather ... take` construct with
-a block:
+The `map` multi sub exported by this module takes a `Range` parameter so that
+you can limit the code to only a certain range of input a block:
 
 ```perl6
-# using gather-with:
-1,1, * + * ... Inf ==> gather-with { take $_ ** 2 } ==> { .[0..^10] }()
-}
-# without gather-with
-1,1, * + * ... Inf ==> { gather for $_ { take $_ ** 2 } }() ==> { .[0..^10] }()
+# using ranged map:
+1,1, * + * ... Inf ==> map ^10, { $_ ** 2 }
+
+# without ranged map:
+1,1, * + * ... Inf ==> { gather for $_[^10] { take $_ ** 2 } }()
 ```
 
 ```perl6
