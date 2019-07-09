@@ -3,7 +3,7 @@
     "name" : "Proc::Feed",
     "api"  : "1",
     "auth" : "github:kjkuan",
-    "version" : "1.0.1",
+    "version" : "1.0.2",
     "description" : "Convenient Proc::Async wrappers that work with the Perl 6 feed operators.",
     "authors" : [ "Jack Kuan" ],
     "license" : "Artistic-2.0",

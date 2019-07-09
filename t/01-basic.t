@@ -127,5 +127,26 @@ ok($err.procs[1].exitcode != 0);
     ok($err ~~ Proc::Feed::BrokenPipeline);
 }
 
+{
+    my @errors;
+    proc <ls whateverdoesnotexist>, :stderr(-> $_ { @errors.push: $_ });
+    ok @errors.join ~~ /whateverdoesnotexist/;
+
+    proc <ls whateverdoesnotexist>, :stderr("/tmp/proc-feed-test.err");
+    ok '/tmp/proc-feed-test.err'.IO.slurp ~~ /whateverdoesnotexist/;
+
+    my $f = open('/tmp/proc-feed-test.err', :w);
+    proc <ls whateverdoesnotexist>, :stderr($f);
+    $f.close;
+    ok '/tmp/proc-feed-test.err'.IO.slurp ~~ /whateverdoesnotexist/;
+
+    try '/tmp/proc-feed-test.err'.IO.unlink;
+
+    my $capture-error;
+    my $out = capture <ls whateverdoesnotexist>,
+                      :!check, :stderr(-> $_ { $capture-error = $_ });
+    ok $capture-error ~~ /whateverdoesnotexist/;
+}
+
 
 done-testing;

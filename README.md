@@ -15,6 +15,8 @@ sub proc(
     Bool :$check = True,
     Bool :$bin,    # only applies to input.
 
+    :$stderr where Any|Callable:D|Str:D|IO::Handle:D,
+
     :$shell where Bool:D|Str:D = False,
 
     :$cwd = $*CWD,
@@ -25,7 +27,8 @@ sub proc(
 ) is export(:DEFAULT, :proc);
 ```
 
-Use the `proc` sub to run a command when you don't need to capture its output:
+Use the `proc` sub to run a command when you don't need to capture its
+output(`STDOUT`):
 
 ```perl6
     proc <<ls -la "READ ME.txt">>;
@@ -37,6 +40,22 @@ rest are arguments passed to the executable.
 > **NOTE**: `proc` blocks until the external command is completed and returns
 > a `Proc` object, which when sunk throws an exception if the command exited
 > with a non-zero status.
+
+It's also possible to redirect `STDERR` if desired:
+
+```perl6
+    # Redirect STDERR to /dev/null
+    proc <ls whatever>, :stderr('/dev/null/');
+
+    # Same thing; but with a file we opened
+    my $black-hole = open('/dev/null', :w);
+    proc <ls whatever>, :stderr($black-hole);
+    $black-hole.close;
+
+    # Same effect that ignores error messages; this time, with a callable
+    # that just ignores the lines from STDERR.
+    proc <ls whatever>, :stderr({;});
+```
 
 Sometimes it can be convenient to run a command via a shell (defaults to
 `/bin/bash`) if you need to use the features (e.g., globbing, I/O redirection,
@@ -88,6 +107,8 @@ sub capture(
     Bool :$chomp = True,
     Bool :$merge,
     Bool :$bin,    # only applies to input.
+
+    :$stderr where Any|Callable:D|Str:D|IO::Handle:D,
 
     :$shell where Bool:D|Str:D = False,
 
@@ -180,6 +201,8 @@ sub pipe(
             || !$chomp
         )
     } = False,
+
+    :$stderr where Any|Callable:D|Str:D|IO::Handle:D,
 
     Bool :$merge,
 
