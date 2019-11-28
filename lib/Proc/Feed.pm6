@@ -30,22 +30,22 @@ proc «cp -r "$src" "$dest"»;
 
 # Example
 my $text = run {
-    pipe(«curl http://somewhere.com/text.gz», :bin) \
-    ==> pipe(«gunzip -c», :bin<IN>, :!chomp)
+    pipe «curl http://somewhere.com/text.gz», :bin \
+    ==> pipe «gunzip -c», :bin<IN>, :!chomp
     ==> join('')
 }
 =end code
 
 =end pod
 
-use v6;
+use v6d;
 
 unit module Proc::Feed;
 
 class ProcHandle {
     has Proc::Async $.proc;
     has Promise $.proc-end;
-    has Promise:D @.stdin-writes;
+    has Promise $.stdin-writes;
     has Iterable $.stdout-iterable;
     has IO::Handle $.stderr-handle;
     has Bool $.close-stderr-handle;
@@ -54,40 +54,38 @@ class ProcHandle {
 class BrokenPipeline is Exception {
 
     has $.error of Exception;
-    has @.procs where Proc|Failure;
-    has @.writes of List; # of Int's or Failure's
+    has @.write-errors of Exception;
+    has @.procs where Proc|Exception;
 
     method message { "Proc pipeline failed with errors!" }
 
     method gist {
         my @errors;
+
         if $!error {
             @errors.push: "\n--- Block exception: --------";
             @errors.push: $!error.gist;
         }
-        for @!procs Z, @!writes Z, ^∞ -> ($proc, @writes, $i) {
-            my $failure;
+
+        for @!procs.kv -> $i, $proc {
+            my $error;
             given $proc {
-                when Failure {
-                    $failure = .exception.gist;
+                when Exception {
+                    $error = .gist;
                 }
-                when .exitcode ≠ 0 {
-                    $failure = "Process (pipe $i) exited unsuccessfully!\n";
-                    $failure ~= "Command: {$proc.command.perl}\n";
-                    $failure ~= "Exit code: {$proc.exitcode}\n";
+                when .?exitcode ≠ 0 {
+                    $error = "Process (pipe $i) exited unsuccessfully!\n";
+                    $error ~= "Command: {.command.perl}\n";
+                    $error ~= "Exit code: {.exitcode}\n";
                 }
             }
-
-            my @write-errors;
-            @write-errors.append: @!writes[$i].grep(Failure)».exception».gist;
-
-            if $failure || @write-errors {
-                @errors.push: "\n--- Proc failure: -----------";
-                @errors.push: $failure if $failure;
-                if @write-errors {
-                    @errors.push: "\n------ Write errors:";
-                    @errors.push: @write-errors.join("\n");
-                }
+            if $error {
+                @errors.push: "\n--- Proc failed: -----------";
+                @errors.push: $error;
+            }
+            with @!write-errors[$i] {
+                @errors.push: "\n------ Failed writing to proc:";
+                @errors.push: .gist;
             }
         }
         return @errors.join("\n");
@@ -112,8 +110,7 @@ multi _proc_impl(
     #| Only applies when output is not binary.
     Bool :$chomp = True,
 
-    #| When :str, return a Failure if the proc failed.
-    #| Default is True.
+    #| Throws an exception if proc or capture failed.
     Bool :$check = True,
 
     #| Redirects stderr to stdout. Default is False.
@@ -190,102 +187,128 @@ multi _proc_impl(
         }
     } if $iter || $str;
 
+
     my $proc-end = $proc.start(:ENV($env), :$cwd);
 
-    # Set up a chain of promises that write to the stdin of the proc in
-    # input order and closes the stdin at the end.
-    my @stdin-writes;
+    my Promise $stdin-writes;
     with $input {
-        my $method = $bin-in ?? "write" !! "print";
-        my $cur = start {};
-        for $input -> $data {
-            $cur = $cur.then: {
-                my $promise = $proc."$method"($data);
-                @stdin-writes.push: $promise;
-                await $promise;
+        $stdin-writes = start {
+            if $input ~~ Blob {
+                await $proc.write($input);
+            } else {
+                my $method = $bin-in ?? "write" !! "print";
+                for $input -> $data {
+                    await $proc."$method"($data);
+                }
             }
+            LEAVE { $proc.close-stdin }
+            True;
         }
-        $cur.then: { await $proc.close-stdin };
     }
 
     my $proc-handle = ProcHandle.new(
         :proc($proc), :$proc-end,
-        :@stdin-writes, :$stdout-iterable,
+        :$stdin-writes, :$stdout-iterable,
         :$stderr-handle, :$close-stderr-handle
     );
 
+
     if $iter || $str {
-        if $str {
+        if $str {  # it's a capture()
             my $result = $stdout-iterable.join('');
+
             my $*PIPED-PROCS = Channel.new;
             $*PIPED-PROCS.send: $proc-handle;
-
-            my $proc = (try await-procs) // (
-                ($! ~~ BrokenPipeline) ?? $!.procs[*-1] !! $!.rethrow;
-            );
-            $proc.sink if $check && $proc.exitcode ≠ 0;
+            my $proc; {
+                $proc = await-procs;
+                CATCH {
+                    when BrokenPipeline { $proc = .procs[*-1] }
+                }
+            }
+            if $check {
+                given $proc {
+                    when Proc { .sink if .exitcode ≠ 0 }
+                    when Exception { .rethrow }
+                }
+            }
             return $chomp ?? $result.chomp !! $result;
+
         } else {
+            # it's a pipe() from a run block; let run() do the await-procs.
             $*PIPED-PROCS.send: $proc-handle;
             return $stdout-iterable;
         }
     } else {
+        # this case is for the proc() calls
         my $*PIPED-PROCS = Channel.new;
         $*PIPED-PROCS.send: $proc-handle;
-        return (try await-procs) // (
-            ($! ~~ BrokenPipeline) ?? $!.procs[*-1] !! $!.rethrow;
-        )
+        my $proc; {
+            $proc = await-procs;
+            CATCH {
+                when BrokenPipeline { $proc = .procs[*-1] }
+            }
+        }
+        given $proc { when Exception { .rethrow } }
+        $proc.sink if $check;
+        return $proc;
     }
 }
 
 
 
 sub await-procs($error?, :$SIGPIPE=False) {
-    my @writes;
+    my @write-errors of Exception;
     my @procs;
+    my $i = 0;
 
     $*PIPED-PROCS.close;
     for $*PIPED-PROCS.list -> (
         :$proc, :$proc-end,
-        :@stdin-writes, :$stdout-iterable,
+        :$stdin-writes, :$stdout-iterable,
         :$stderr-handle, :$close-stderr-handle
     ) {
-        # Try to close stdin again in case the write promise chain has
-        # been broken.
-        $proc.close-stdin if $proc.w;
-
         # Signal the child process that we are done with the pipe;
         # Do it in 1s to give the process a chance to exit.
         $proc.ready.then: {
             Promise.in(1).then: { $proc.kill(Signal::SIGPIPE) }
         } if $SIGPIPE;
 
-        my @results := ((try await $_) // Failure.new($!) for @stdin-writes);
-        @writes.push: @results if @results;
+        with $stdin-writes {
+            @write-errors[$i++] = do {
+                try await $stdin-writes;
+                $! // Nil;
+            }
+        }
 
         sink $stdout-iterable.Seq if $stdout-iterable.defined;
         #= needed to ensure $proc-end will be kept.
 
-        @procs.push: (try await $proc-end) // Failure.new($!);
+        @procs.push: (try await $proc-end) // $!;
 
         $stderr-handle.close if $stderr-handle && $close-stderr-handle;
     }
 
-    if $error || @writes.any.any ~~ Failure || @procs.grep({$_ ~~ Failure or .exitcode}) {
+    if $error ||
+       @procs.any ~~ Exception:D|{.?exitcode} ||
+       @write-errors.any ~~ Exception:D
+    {
         BrokenPipeline.new(
-            :error($error // Exception),
-            :@procs, :@writes
+            :error($error // Nil),
+            :@procs, :@write-errors
         ).throw;
     }
-    return @procs[*-1];
+    return @procs[*-1] if @procs;
 }
 
 multi sub run(&block, :$check = True) is export(:DEFAULT, :run) {
     my $*PIPED-PROCS = Channel.new;
+
     try my $result := block();
-    try await-procs $!, :SIGPIPE;
+    my $error = $!;
+
+    try await-procs($error, :SIGPIPE);
     if $check {
-        $!.rethrow if $!;
+        .rethrow with $!;
         return $result;
     } else {
         return $result, $!;
@@ -296,8 +319,8 @@ sub proc(
     \command where Str:D|List:D,
     $input? is raw,
 
-    Bool :$check = True,
-    Bool :$bin,    # only applies to input.
+    Bool :$check = False,
+    :$bin where 'IN' | {! .so} = False,
 
     :$stderr where Any|Callable:D|Str:D|IO::Handle:D,
 
@@ -306,10 +329,12 @@ sub proc(
     :$shell where Bool:D|Str:D = False,
     :$scheduler = $*SCHEDULER
 
+    --> Proc
+
 ) is export(:DEFAULT, :proc) {
     _proc_impl(command, $input, :!str, :!iter,
                :$check,
-               :bin($bin ?? 'IN' !! False),
+               :$bin,
                :$stderr,
                :$cwd, :$env,
                :$shell, :$scheduler
@@ -322,7 +347,7 @@ sub capture(
 
     Bool :$check = True,
     Bool :$chomp = True,
-    Bool :$bin,    # only applies to input.
+    :$bin where 'IN' | {! .so} = False,
 
     :$stderr where Any|Callable:D|Str:D|IO::Handle:D,
     Bool :$merge,
@@ -337,9 +362,10 @@ sub capture(
     --> Str:D
 
 ) is export(:DEFAULT, :capture) {
+
     _proc_impl(command, $input, :str, :!iter,
                :$check, :$chomp, :$stderr, :$merge,
-               :bin($bin ?? 'IN' !! False),
+               :$bin,
                :$enc, :$translate-nl,
                :$cwd, :$env,
                :$shell,
@@ -369,6 +395,8 @@ sub pipe(
     Hash() :$env = %*ENV,
     :$shell where Bool:D|Str:D = False,
     :$scheduler = $*SCHEDULER
+
+    --> List:D
 
 ) is export(:DEFAULT, :pipe) {
 

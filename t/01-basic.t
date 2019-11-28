@@ -115,7 +115,7 @@ my ($result, $err) = run :!check, {
     my @a;
     @a.xxx;
 };
-ok($err.error ~~ Exception);
+ok($err.error ~~ Exception:D);
 ok($err.procs[1].exitcode != 0);
 
 {

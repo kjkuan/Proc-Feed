@@ -12,8 +12,9 @@ sub proc(
     \command where Str:D|List:D,
     $input? is raw,
 
-    Bool :$check = True,
-    Bool :$bin,    # only applies to input.
+    Bool :$check = False,
+
+    :$bin where 'IN' | {! .so} = False,  # i.e., only :bin<IN> or :!bin
 
     :$stderr where Any|Callable:D|Str:D|IO::Handle:D,
 
@@ -23,6 +24,8 @@ sub proc(
     Hash() :$env = %*ENV,
 
     :$scheduler = $*SCHEDULER
+
+    --> Proc:D
 
 ) is export(:DEFAULT, :proc);
 ```
@@ -106,7 +109,8 @@ sub capture(
     Bool :$check = True,
     Bool :$chomp = True,
     Bool :$merge,
-    Bool :$bin,    # only applies to input.
+
+    :$bin where 'IN' | {! .so} = False,  # i.e., only :bin<IN> or :!bin
 
     :$stderr where Any|Callable:D|Str:D|IO::Handle:D,
 
@@ -161,13 +165,13 @@ By default, both input and output are assumed to be lines of strings, but you
 can specify both to be binary with `:bin`, or only one of which to be binary
 with either `:bin<IN>` or `:bin<OUT>`:
 
-> **NOTE**: For `capture` and `proc`, only `:bin` and `:!bin` are possible, and
-> both apply only to `STDIN`.
+> **NOTE**: For `capture` and `proc`, only `:bin<IN>` (default) and `:!bin`
+> are possible.
 
 ```perl6
     # Binary (Blob) in; string (Str) out.
     my $blob = Blob.new(slurp("/bin/bash", :bin));
-    my $chksum = ($blob ==> capture('md5sum', :bin)).split(' ')[0];
+    my $chksum = ($blob ==> capture('md5sum', :bin<IN>)).split(' ')[0];
 
     # String (Str) in; binary (Blob) out.
     # See below for more details on using 'run' and 'pipe'.
@@ -216,6 +220,8 @@ sub pipe(
 
     :$scheduler = $*SCHEDULER
 
+    --> List:D
+
 ) is export(:DEFAULT, :pipe);
 ```
 
@@ -224,15 +230,16 @@ external process, so you can feed it to another callable. By default, text
 output is assumed and the output is an iterable of lines. If binary output
 is specified, then the output will be an iterable of `Blob`'s.
 
-`pipe` should be used within a `Block` passed to the `run` sub, which returns
-the result returned by the block:
+`pipe` should be used within a `Block` passed to the `run` sub, and it should
+not be used at the end of a pipeline where nothing consumes its output. The
+`run { ... } ` returns the result returned by the run block. Examples:
 
 ```perl6
     # Example
     my $chksum = run {
         slurp("/bin/bash", :bin) \
         ==> pipe('gzip', :bin)
-        ==> capture('md5sum', :bin<IN>)
+        ==> pipe('md5sum', :bin<IN>)
         ==> split(' ')
         ==> *.[0]()
     }
@@ -241,13 +248,13 @@ the result returned by the block:
     run {
         my $tarball = open("./somedir.tgz", :w);
         LEAVE $tarball.close;
-        pipe(«ssh my.remote-host.com "tar -czf - ./somedir"», :bin) \
+        pipe «ssh my.remote-host.com "tar -czf - ./somedir"», :bin  \
         ==> each { spurt $tarball, $_ }
     }
 
     # Example
     my $total = run {
-        [+] (pipe(«find /var/log/ -f») ==> map(*.IO.s))
+        [+] (pipe «find /var/log -type f» ==> map(*.IO.s))
     } 
 ```
 
@@ -259,7 +266,8 @@ them the `SIGCHLD` signal.
 > suitable to be used at the end of a pipeline, unless you also consume the
 > entire pipeline with somethig like the `[+]` operator in the above example.
 > To consume a pipeline, you can also assign or feed the pipeline to an array,
-> or listify the pipeline by using a `==> @` at the end of the pipeline.
+> or listify the pipeline by using a `==> @` at the end of the pipeline, or
+> feed it to a `proc(...)` that consumes STDIN.
 
 By default, `run` throws a `BrokenPipeline` exception if any of the `pipe`
 calls fails or exits with non-zero status, or if an exception is propagated
